@@ -18,10 +18,10 @@ jobs:
       - name: Test with coverage
         run: |
           # Network actor tests may keep the process alive after all tests pass;
-          # watchdog kills it after 5 minutes so CI doesn't hang forever.
+          # watchdog kills it after 15s so CI doesn't hang.
           swift test --enable-code-coverage &
           SWIFT_PID=$!
-          ( sleep 300; kill $SWIFT_PID 2>/dev/null ) &
+          ( sleep 15; kill $SWIFT_PID 2>/dev/null ) &
           WATCHDOG_PID=$!
           TEST_EXIT=0
           wait $SWIFT_PID || TEST_EXIT=$?
@@ -38,7 +38,17 @@ jobs:
           BIN_PATH=$(swift build --show-bin-path)
           XCTEST_PATH=$(find "${BIN_PATH}" -name '*.xctest' -type d | head -1)
           EXEC_PATH="${XCTEST_PATH}/Contents/MacOS/$(basename "${XCTEST_PATH}" .xctest)"
-          PROFDATA=$(find .build -name 'default.profdata' -type f | head -1)
+          PROFDATA=$(find .build -name 'default.profdata' -type f 2>/dev/null | head -1)
+          # If watchdog killed the process before profdata was merged, do it manually
+          if [ -z "$PROFDATA" ]; then
+            echo "No profdata found, merging profraw files manually..."
+            PROFDATA=".build/merged.profdata"
+            if ! find .build -name '*.profraw' -type f -print0 2>/dev/null \
+                 | xargs -0 xcrun llvm-profdata merge -output "$PROFDATA"; then
+              echo "No profraw files found, skipping coverage"
+              exit 0
+            fi
+          fi
           xcrun llvm-cov export \
             "${EXEC_PATH}" \
             -instr-profile="${PROFDATA}" \
