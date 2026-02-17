@@ -16,9 +16,13 @@ jobs:
         run: swift build
 
       - name: Run tests with coverage
+        env:
+          LLVM_PROFILE_FILE: ".build/coverage/test_%p%c.profraw"
         run: |
-          # swift test --enable-code-coverage builds instrumented binaries
-          # and manages profdata collection automatically.
+          mkdir -p .build/coverage
+          # --enable-code-coverage builds instrumented binaries.
+          # LLVM_PROFILE_FILE with %c writes profraw continuously so
+          # data survives the watchdog kill when the process hangs.
           swift test --enable-code-coverage &
           TEST_PID=$!
           ( sleep 60; kill $TEST_PID 2>/dev/null ) &
@@ -36,11 +40,11 @@ jobs:
       - name: Export coverage to lcov
         run: |
           BIN_PATH=$(swift build --show-bin-path)
-          PROFDATA="${BIN_PATH}/codecov/default.profdata"
           TEST_BIN="${BIN_PATH}/OSCFoundationPackageTests.xctest/Contents/MacOS/OSCFoundationPackageTests"
+          xcrun llvm-profdata merge .build/coverage/*.profraw -output .build/coverage/merged.profdata
           xcrun llvm-cov export \
             "${TEST_BIN}" \
-            -instr-profile="${PROFDATA}" \
+            -instr-profile=".build/coverage/merged.profdata" \
             -format=lcov \
             --ignore-filename-regex='\.build|Tests' \
             > coverage.lcov
