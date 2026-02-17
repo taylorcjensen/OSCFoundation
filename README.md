@@ -138,4 +138,4 @@ Sources/OSCFoundation/
 
 ## License
 
-[MIT](LICENSE) -- Copyright (c) 2026 Taylor C Jensen
+[MIT](LICENSE) -- Copyright © 2026 Taylor C Jensen
