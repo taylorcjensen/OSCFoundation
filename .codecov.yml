@@ -8,6 +8,9 @@ coverage:
       default:
         target: auto
 
+ignore:
+  - "Tests/**"
+
 comment:
   layout: "reach,diff,flags,files"
   behavior: default
