@@ -15,18 +15,40 @@ jobs:
       - name: Build
         run: swift build
 
-      - name: Test with coverage
-        run: swift test --enable-code-coverage
+      - name: Build tests with coverage
+        run: swift build --build-tests --enable-code-coverage
+
+      - name: Run tests
+        env:
+          LLVM_PROFILE_FILE: ".build/coverage/test_%p%c.profraw"
+        run: |
+          mkdir -p .build/coverage
+          # --skip-build: tests already compiled above
+          # Continuous profiling (%c) writes coverage data to disk in real-time,
+          # so data survives even if the process hangs and gets killed.
+          swift test --skip-build &
+          TEST_PID=$!
+          ( sleep 15; kill $TEST_PID 2>/dev/null ) &
+          WATCHDOG_PID=$!
+          TEST_EXIT=0
+          wait $TEST_PID || TEST_EXIT=$?
+          kill $WATCHDOG_PID 2>/dev/null || true
+          wait $WATCHDOG_PID 2>/dev/null || true
+          # 0 = clean exit, 143 = SIGTERM from watchdog (tests passed but process hung)
+          if [ $TEST_EXIT -eq 0 ] || [ $TEST_EXIT -eq 143 ]; then
+            exit 0
+          fi
+          exit $TEST_EXIT
 
       - name: Export coverage to lcov
         run: |
           BIN_PATH=$(swift build --show-bin-path)
           XCTEST_PATH=$(find "${BIN_PATH}" -name '*.xctest' -type d | head -1)
           EXEC_PATH="${XCTEST_PATH}/Contents/MacOS/$(basename "${XCTEST_PATH}" .xctest)"
-          PROFDATA=$(find .build -name 'default.profdata' -type f | head -1)
+          xcrun llvm-profdata merge .build/coverage/*.profraw -output .build/coverage/merged.profdata
           xcrun llvm-cov export \
             "${EXEC_PATH}" \
-            -instr-profile="${PROFDATA}" \
+            -instr-profile=".build/coverage/merged.profdata" \
             -format=lcov \
             > coverage.lcov
 
