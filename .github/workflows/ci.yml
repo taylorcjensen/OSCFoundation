@@ -15,17 +15,20 @@ jobs:
       - name: Build
         run: swift build
 
-      - name: Run tests with coverage
+      - name: Build tests with coverage
+        run: swift build --build-tests --enable-code-coverage
+
+      - name: Run tests
         env:
           LLVM_PROFILE_FILE: ".build/coverage/test_%p%c.profraw"
         run: |
           mkdir -p .build/coverage
-          # --enable-code-coverage builds instrumented binaries.
-          # LLVM_PROFILE_FILE with %c writes profraw continuously so
-          # data survives the watchdog kill when the process hangs.
-          swift test --enable-code-coverage &
+          # --skip-build: instrumented tests already compiled above.
+          # Continuous profiling (%c) writes coverage data to disk in real-time,
+          # so data survives even if the process hangs and gets killed.
+          swift test --skip-build &
           TEST_PID=$!
-          ( sleep 60; kill $TEST_PID 2>/dev/null ) &
+          ( sleep 30; kill $TEST_PID 2>/dev/null ) &
           WATCHDOG_PID=$!
           TEST_EXIT=0
           wait $TEST_PID || TEST_EXIT=$?
