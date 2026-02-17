@@ -240,14 +240,15 @@ public enum OSCDecoder {
         guard offset + 8 <= data.endIndex else {
             throw OSCDecodeError.truncatedData
         }
-        let value = UInt64(data[offset]) << 56
+        let hi = UInt64(data[offset]) << 56
             | UInt64(data[offset + 1]) << 48
             | UInt64(data[offset + 2]) << 40
             | UInt64(data[offset + 3]) << 32
-            | UInt64(data[offset + 4]) << 24
+        let lo = UInt64(data[offset + 4]) << 24
             | UInt64(data[offset + 5]) << 16
             | UInt64(data[offset + 6]) << 8
             | UInt64(data[offset + 7])
+        let value = hi | lo
         offset += 8
         return value
     }
