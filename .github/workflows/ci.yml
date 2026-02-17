@@ -28,7 +28,7 @@ jobs:
           # so data survives even if the process hangs and gets killed.
           swift test --skip-build &
           TEST_PID=$!
-          ( sleep 15; kill $TEST_PID 2>/dev/null ) &
+          ( sleep 1; kill $TEST_PID 2>/dev/null ) &
           WATCHDOG_PID=$!
           TEST_EXIT=0
           wait $TEST_PID || TEST_EXIT=$?
