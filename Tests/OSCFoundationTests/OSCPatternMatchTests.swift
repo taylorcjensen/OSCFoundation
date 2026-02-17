@@ -105,10 +105,11 @@ struct OSCPatternMatchTests {
         #expect(!OSCPatternMatch.matches(pattern: "/*/*", address: "/foo"))
     }
 
-    @Test("Empty alternative in braces")
+    @Test("Empty alternative in braces is skipped")
     func emptyBraceAlternative() {
-        // {,bar} should match empty string or "bar"
-        #expect(OSCPatternMatch.matches(pattern: "/foo/{,bar}", address: "/foo/"))
+        // Per OSC 1.0 spec, brace alternatives are literal strings.
+        // Empty alternatives are skipped (consistent with OSCKit behavior).
+        #expect(!OSCPatternMatch.matches(pattern: "/foo/{,bar}", address: "/foo/"))
         #expect(OSCPatternMatch.matches(pattern: "/foo/{,bar}", address: "/foo/bar"))
     }
 
@@ -138,13 +139,14 @@ struct OSCPatternMatchTests {
         #expect(!OSCPatternMatch.matches(pattern: "/[ab", address: "/a"))
     }
 
-    @Test("Nested braces")
+    @Test("Nested braces are literal text in alternatives")
     func nestedBraces() {
-        // Pattern "/{a{b,c},d}" -- nested brace alternatives
-        // "ab" -> matches inner alternative "a" + "b" from {b,c}
-        #expect(OSCPatternMatch.matches(pattern: "/{a{b,c},d}", address: "/ab"))
-        #expect(OSCPatternMatch.matches(pattern: "/{a{b,c},d}", address: "/ac"))
+        // Per OSC 1.0 spec, brace alternatives are literal strings.
+        // Inner braces are NOT expanded as sub-patterns.
+        #expect(OSCPatternMatch.matches(pattern: "/{a{b,c},d}", address: "/a{b,c}"))
         #expect(OSCPatternMatch.matches(pattern: "/{a{b,c},d}", address: "/d"))
+        #expect(!OSCPatternMatch.matches(pattern: "/{a{b,c},d}", address: "/ab"))
+        #expect(!OSCPatternMatch.matches(pattern: "/{a{b,c},d}", address: "/ac"))
         #expect(!OSCPatternMatch.matches(pattern: "/{a{b,c},d}", address: "/a"))
     }
 }

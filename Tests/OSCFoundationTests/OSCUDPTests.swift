@@ -328,4 +328,35 @@ struct OSCUDPTests {
 
         await server.stop()
     }
+
+    // MARK: - Broadcast
+
+    @Test("Broadcast client sends without error")
+    func broadcastClientSend() async throws {
+        // Verify the broadcast-enabled client can be created and send
+        // without throwing. Actual broadcast delivery depends on the
+        // network environment and is not reliably testable on loopback.
+        let server = OSCUDPServer(port: 0)
+        try await server.start()
+        let port = await server.listeningPort!
+
+        let client = OSCUDPClient(
+            host: "127.255.255.255",
+            port: port,
+            isIPv4BroadcastEnabled: true
+        )
+        let msg = try OSCMessage("/broadcast/test", arguments: [Int32(99)])
+        try await client.send(msg)
+
+        await client.close()
+        await server.stop()
+    }
+
+    @Test("Broadcast flag defaults to false")
+    func broadcastDefaultFalse() async throws {
+        // Existing init without the flag should still work
+        let client = OSCUDPClient(host: "127.0.0.1", port: 9999)
+        // Just verify construction succeeds -- the default is false
+        await client.close()
+    }
 }

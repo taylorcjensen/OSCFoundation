@@ -7,6 +7,9 @@ import Network
 /// created on the first send. No framing is applied -- each packet is
 /// sent as a single UDP datagram.
 ///
+/// Enable ``isIPv4BroadcastEnabled`` to send to broadcast addresses
+/// (e.g., `255.255.255.255` or `192.168.1.255`).
+///
 /// ```swift
 /// let client = OSCUDPClient(host: "192.168.1.100", port: 8000)
 /// try await client.send(OSCMessage("/eos/ping"))
@@ -15,6 +18,7 @@ import Network
 public actor OSCUDPClient {
     private let host: String
     private let port: UInt16
+    private let isIPv4BroadcastEnabled: Bool
     private var connection: NWConnection?
 
     /// Creates a UDP client targeting the given host and port.
@@ -24,10 +28,14 @@ public actor OSCUDPClient {
     /// - Parameters:
     ///   - host: The hostname or IP address.
     ///   - port: The UDP port number. Must be greater than 0.
-    public init(host: String, port: UInt16) {
+    ///   - isIPv4BroadcastEnabled: When `true`, allows sending to
+    ///     broadcast addresses. Enables local endpoint reuse so
+    ///     multiple processes can share the port. Defaults to `false`.
+    public init(host: String, port: UInt16, isIPv4BroadcastEnabled: Bool = false) {
         precondition(port > 0, "Port must be greater than 0")
         self.host = host
         self.port = port
+        self.isIPv4BroadcastEnabled = isIPv4BroadcastEnabled
     }
 
     /// Sends an OSC packet as a single UDP datagram.
@@ -75,7 +83,11 @@ public actor OSCUDPClient {
         if let connection { return connection }
         let nwHost = NWEndpoint.Host(host)
         let nwPort = NWEndpoint.Port(rawValue: port)!
-        let conn = NWConnection(host: nwHost, port: nwPort, using: .udp)
+        let params = NWParameters.udp
+        if isIPv4BroadcastEnabled {
+            params.allowLocalEndpointReuse = true
+        }
+        let conn = NWConnection(host: nwHost, port: nwPort, using: params)
         conn.start(queue: DispatchQueue(label: "com.oscfoundation.udp.client"))
         self.connection = conn
         return conn

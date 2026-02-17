@@ -82,7 +82,13 @@ public enum OSCPatternMatch {
                 ai += 1
 
             case "{":
-                return matchBrace(pattern: pattern, pi: pi, address: address, ai: ai)
+                if let result = matchBrace(pattern: pattern, pi: pi, address: address, ai: ai) {
+                    return result
+                }
+                // Malformed brace (no matching '}') - treat '{' as literal
+                guard ai < address.count, p == address[ai] else { return false }
+                pi += 1
+                ai += 1
 
             default:
                 guard ai < address.count, p == address[ai] else { return false }
@@ -109,7 +115,7 @@ public enum OSCPatternMatch {
         var matched = false
 
         while i < pattern.count, pattern[i] != "]" {
-            if i + 2 < pattern.count, pattern[i + 1] == "-" {
+            if i + 2 < pattern.count, pattern[i + 1] == "-", pattern[i + 2] != "]" {
                 // Range: [a-z]
                 let lo = pattern[i]
                 let hi = pattern[i + 2]
@@ -127,11 +133,18 @@ public enum OSCPatternMatch {
         return (matched, i + 1) // skip past ']'
     }
 
-    /// Matches a `{foo,bar,...}` alternative expression with backtracking.
+    /// Matches a `{foo,bar,...}` alternative expression with literal string matching.
+    ///
+    /// Per the OSC 1.0 spec, brace alternatives are a "list of strings" --
+    /// each alternative is matched literally, not as a pattern. Wildcards
+    /// (`*`, `?`) inside braces have no special meaning.
+    ///
+    /// - Returns: Match result, or `nil` if the brace expression is malformed
+    ///   (no matching `}`), signaling the caller to treat `{` as literal.
     private static func matchBrace(
         pattern: [Character], pi: Int,
         address: [Character], ai: Int
-    ) -> Bool {
+    ) -> Bool? {
         var i = pi + 1 // skip '{'
         var depth = 1
 
@@ -154,13 +167,23 @@ public enum OSCPatternMatch {
             i += 1
         }
 
+        // Malformed: no matching closing brace
+        guard depth == 0 else { return nil }
+
         // i is now past the closing '}'
         let restPattern = Array(pattern[i...])
 
         for alt in alternatives {
-            let combined = alt + restPattern
-            if matchPart(pattern: combined, pi: 0, address: address, ai: ai) {
-                return true
+            // Skip empty alternatives
+            if alt.isEmpty { continue }
+
+            // Match alternative literally (not as a pattern)
+            let end = ai + alt.count
+            guard end <= address.count else { continue }
+            if Array(address[ai ..< end]) == alt {
+                if matchPart(pattern: restPattern, pi: 0, address: address, ai: end) {
+                    return true
+                }
             }
         }
 

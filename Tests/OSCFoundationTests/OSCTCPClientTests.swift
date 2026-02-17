@@ -142,6 +142,51 @@ struct OSCTCPClientTests {
         await client.disconnect()
         await server.stop()
     }
+    @Test("ConnectionState equality covers all cases")
+    func connectionStateEquality() {
+        // Same .failed message -> true
+        #expect(ConnectionState.failed("error") == .failed("error"))
+        // Different .failed message -> false
+        #expect(ConnectionState.failed("timeout") != .failed("refused"))
+        // .connecting == .connecting -> true
+        #expect(ConnectionState.connecting == .connecting)
+    }
+
+    @Test("Connection to refused port transitions to failed")
+    func connectionRefused() async throws {
+        // Port 1 on localhost is almost certainly not listening.
+        // NWConnection enters .waiting (connection refused), which our
+        // handler maps to ConnectionState.failed.
+        let client = OSCTCPClient(host: "127.0.0.1", port: 1)
+
+        let failedTask = Task { () -> Bool in
+            for await state in await client.stateUpdates {
+                if case .failed = state { return true }
+            }
+            return false
+        }
+
+        await client.connect()
+
+        let gotFailed = await withTaskGroup(of: Bool.self) { group in
+            group.addTask { await failedTask.value }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 10_000_000_000)
+                failedTask.cancel()
+                return false
+            }
+            for await result in group {
+                if result {
+                    group.cancelAll()
+                    return true
+                }
+            }
+            return false
+        }
+
+        #expect(gotFailed, "Expected connection to fail for refused port")
+        await client.disconnect()
+    }
 }
 
 // MARK: - Test Server
