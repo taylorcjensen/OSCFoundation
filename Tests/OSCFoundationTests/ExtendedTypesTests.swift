@@ -135,6 +135,13 @@ struct ExtendedTypesTests {
 
     // MARK: - Char
 
+    @Test("Character conforms to OSCArgumentConvertible")
+    func characterConvertible() throws {
+        // Pass Character directly (not OSCArgument.char) to exercise Character.oscArgument
+        let msg = try OSCMessage("/c", arguments: [Character("A")])
+        #expect(msg.arguments == [.char("A")])
+    }
+
     @Test("Encode char")
     func encodeChar() throws {
         let msg = try OSCMessage("/c", arguments: [OSCArgument.char("A")])

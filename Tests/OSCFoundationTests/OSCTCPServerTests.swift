@@ -387,10 +387,97 @@ struct OSCTCPServerTests {
         await server.stop()
     }
 
+    @Test("Start on occupied port throws")
+    func startOnOccupiedPort() async throws {
+        let server1 = OSCTCPServer(port: 0)
+        try await server1.start()
+        let port = await server1.listeningPort!
+
+        let server2 = OSCTCPServer(port: port)
+        do {
+            try await server2.start()
+            Issue.record("Expected error starting on occupied port")
+            await server2.stop()
+        } catch {
+            // Expected -- port is already in use
+        }
+
+        await server1.stop()
+    }
+
     @Test("ConnectionID description format")
     func connectionIDDescription() {
         let id = OSCTCPServer.ConnectionID(id: 42)
         #expect(String(describing: id) == "Connection(42)")
+    }
+
+    @Test("Server drops malformed packets and continues")
+    func serverDropsMalformedPacket() async throws {
+        let server = OSCTCPServer(port: 0)
+        try await server.start()
+        let port = await server.listeningPort!
+
+        let receiveTask = Task { () -> OSCPacket? in
+            for await incoming in await server.packets {
+                return incoming.packet
+            }
+            return nil
+        }
+
+        // Connect a raw NWConnection to bypass OSC encoding
+        let conn = NWConnection(
+            host: "127.0.0.1",
+            port: NWEndpoint.Port(rawValue: port)!,
+            using: .tcp
+        )
+
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            nonisolated(unsafe) var resumed = false
+            conn.stateUpdateHandler = { state in
+                guard !resumed else { return }
+                if case .ready = state {
+                    resumed = true
+                    continuation.resume()
+                }
+            }
+            conn.start(queue: DispatchQueue(label: "test.raw.tcp"))
+        }
+
+        // Send PLH-framed garbage (not valid OSC)
+        let garbage = Data([0xDE, 0xAD, 0xBE, 0xEF])
+        let malformedFrame = TCPDeframer.frame(garbage, using: .plh)
+        conn.send(content: malformedFrame, completion: .contentProcessed { _ in })
+
+        // Small delay, then send a valid PLH-framed OSC message
+        try await Task.sleep(nanoseconds: 100_000_000)
+        let validOSC = try OSCEncoder.encode(try OSCMessage("/valid", arguments: [Int32(1)]))
+        let validFrame = TCPDeframer.frame(validOSC, using: .plh)
+        conn.send(content: validFrame, completion: .contentProcessed { _ in })
+
+        // Server should receive the valid packet (malformed one was dropped)
+        let result = await withTaskGroup(of: OSCPacket?.self) { group in
+            group.addTask { await receiveTask.value }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                receiveTask.cancel()
+                return nil
+            }
+            for await r in group {
+                if r != nil { group.cancelAll(); return r }
+            }
+            return nil
+        }
+
+        guard case .message(let received) = result else {
+            Issue.record("Server should have received valid message after dropping malformed one")
+            conn.cancel()
+            await server.stop()
+            return
+        }
+        #expect(received.addressPattern == "/valid")
+
+        conn.cancel()
+        await server.stop()
     }
 
     @Test("Server detects client disconnect")

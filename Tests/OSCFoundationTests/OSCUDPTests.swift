@@ -222,6 +222,94 @@ struct OSCUDPTests {
         await server.stop()
     }
 
+    @Test("Server drops malformed UDP packets and continues")
+    func serverDropsMalformedPacket() async throws {
+        let server = OSCUDPServer(port: 0)
+        try await server.start()
+        let port = await server.listeningPort!
+
+        let receiveTask = Task { () -> OSCPacket? in
+            for await incoming in await server.packets {
+                return incoming.packet
+            }
+            return nil
+        }
+
+        // Send malformed data via raw NWConnection
+        let rawConn = NWConnection(
+            host: "127.0.0.1",
+            port: NWEndpoint.Port(rawValue: port)!,
+            using: .udp
+        )
+
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            nonisolated(unsafe) var resumed = false
+            rawConn.stateUpdateHandler = { state in
+                guard !resumed else { return }
+                if case .ready = state {
+                    resumed = true
+                    continuation.resume()
+                }
+            }
+            rawConn.start(queue: DispatchQueue(label: "test.raw.udp"))
+        }
+
+        // Send garbage bytes (not valid OSC)
+        let garbage = Data([0xDE, 0xAD, 0xBE, 0xEF])
+        rawConn.send(content: garbage, completion: .contentProcessed { _ in })
+
+        // Wait for server to process and drop the malformed packet
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        // Now send a valid message via OSCUDPClient
+        let client = OSCUDPClient(host: "127.0.0.1", port: port)
+        try await client.send(try OSCMessage("/valid", arguments: [Int32(1)]))
+
+        let result = await withTaskGroup(of: OSCPacket?.self) { group in
+            group.addTask { await receiveTask.value }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                receiveTask.cancel()
+                return nil
+            }
+            for await r in group {
+                if r != nil { group.cancelAll(); return r }
+            }
+            return nil
+        }
+
+        guard case .message(let received) = result else {
+            Issue.record("Server should have received valid message after dropping malformed one")
+            rawConn.cancel()
+            await client.close()
+            await server.stop()
+            return
+        }
+        #expect(received.addressPattern == "/valid")
+
+        rawConn.cancel()
+        await client.close()
+        await server.stop()
+    }
+
+    @Test("Start on occupied port throws")
+    func startOnOccupiedPort() async throws {
+        let server1 = OSCUDPServer(port: 0)
+        try await server1.start()
+        let port = await server1.listeningPort!
+
+        let server2 = OSCUDPServer(port: port)
+        do {
+            try await server2.start()
+            Issue.record("Expected error starting on occupied port")
+            await server2.stop()
+        } catch {
+            // Expected -- port is already in use
+        }
+
+        await server1.stop()
+    }
+
     @Test("Send to unknown sender throws unknownSender")
     func sendToUnknownSender() async throws {
         let server = OSCUDPServer(port: 0)
