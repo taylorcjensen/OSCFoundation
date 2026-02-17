@@ -18,14 +18,14 @@ jobs:
       - name: Test with coverage
         run: |
           # Network actor tests may keep the process alive after all tests pass;
-          # watchdog kills it after 5 minutes so CI doesn't hang.
+          # watchdog kills it after 5 minutes so CI doesn't hang forever.
           swift test --enable-code-coverage &
           SWIFT_PID=$!
-          ( sleep 300 && kill $SWIFT_PID 2>/dev/null ) &
+          ( sleep 300; kill $SWIFT_PID 2>/dev/null ) &
           WATCHDOG_PID=$!
-          wait $SWIFT_PID 2>/dev/null
-          TEST_EXIT=$?
-          kill $WATCHDOG_PID 2>/dev/null
+          TEST_EXIT=0
+          wait $SWIFT_PID || TEST_EXIT=$?
+          kill $WATCHDOG_PID 2>/dev/null || true
           wait $WATCHDOG_PID 2>/dev/null || true
           # 143 = SIGTERM from watchdog (tests passed but process hung)
           if [ $TEST_EXIT -eq 0 ] || [ $TEST_EXIT -eq 143 ]; then
