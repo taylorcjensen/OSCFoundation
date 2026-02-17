@@ -10,6 +10,7 @@ struct OSCTCPClientTests {
         let client = OSCTCPClient(host: "127.0.0.1", port: 9999)
         let state = await client.state
         #expect(state == .disconnected)
+        await client.disconnect()
     }
 
     @Test("Send before connect throws notConnected")
@@ -21,6 +22,7 @@ struct OSCTCPClientTests {
         } catch let error as OSCTCPError {
             #expect(error == .notConnected)
         }
+        await client.disconnect()
     }
 
     @Test("Full TCP round-trip with local listener")
