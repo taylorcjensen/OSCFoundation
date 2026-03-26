@@ -135,10 +135,10 @@ public actor OSCTCPClient {
             updateState(.disconnected)
         case .preparing, .setup:
             updateState(.connecting)
-        case .waiting(let error):
-            updateState(.failed(error.localizedDescription))
-            connection?.cancel()
-            connection = nil
+        case .waiting:
+            // NWConnection will auto-retry when the network path becomes viable.
+            // Do not report .failed or cancel — let the connection recover on its own.
+            break
         @unknown default:
             break
         }
