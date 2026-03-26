@@ -21,6 +21,11 @@ public actor OSCTCPClient {
     private let host: String
     private let port: UInt16
     private let framing: TCPFraming
+    private let connectionTimeout: Int?
+    private let enableKeepalive: Bool
+    private let keepaliveIdle: Int
+    private let keepaliveInterval: Int
+    private let keepaliveCount: Int
     private var connection: NWConnection?
     private var deframer: TCPDeframer
     private var isReceiving = false
@@ -45,11 +50,37 @@ public actor OSCTCPClient {
     ///   - host: The hostname or IP address.
     ///   - port: The TCP port number (default 3032 for Eos). Must be greater than 0.
     ///   - framing: The TCP framing protocol to use (default `.plh`).
-    public init(host: String, port: UInt16 = 3032, framing: TCPFraming = .plh) {
+    ///   - connectionTimeout: Optional TCP connect timeout in seconds. If set,
+    ///     the connection attempt will enter `.waiting` when the timeout elapses.
+    ///   - enableKeepalive: Whether to enable TCP keepalive probes.
+    ///   - keepaliveIdle: Idle time in seconds before the first keepalive probe.
+    ///   - keepaliveInterval: Seconds between keepalive probes.
+    ///   - keepaliveCount: Number of failed keepalive probes before giving up.
+    public init(
+        host: String,
+        port: UInt16 = 3032,
+        framing: TCPFraming = .plh,
+        connectionTimeout: Int? = nil,
+        enableKeepalive: Bool = false,
+        keepaliveIdle: Int = 15,
+        keepaliveInterval: Int = 5,
+        keepaliveCount: Int = 3
+    ) {
         precondition(port > 0, "Port must be greater than 0")
+        if let connectionTimeout {
+            precondition(connectionTimeout > 0, "Connection timeout must be greater than 0")
+        }
+        precondition(keepaliveIdle > 0, "Keepalive idle must be greater than 0")
+        precondition(keepaliveInterval > 0, "Keepalive interval must be greater than 0")
+        precondition(keepaliveCount > 0, "Keepalive count must be greater than 0")
         self.host = host
         self.port = port
         self.framing = framing
+        self.connectionTimeout = connectionTimeout
+        self.enableKeepalive = enableKeepalive
+        self.keepaliveIdle = keepaliveIdle
+        self.keepaliveInterval = keepaliveInterval
+        self.keepaliveCount = keepaliveCount
         self.deframer = TCPDeframer(framing: framing)
 
         var packetCont: AsyncStream<OSCPacket>.Continuation!
@@ -67,7 +98,18 @@ public actor OSCTCPClient {
     public func connect() {
         let nwHost = NWEndpoint.Host(host)
         let nwPort = NWEndpoint.Port(rawValue: port)!
-        let connection = NWConnection(host: nwHost, port: nwPort, using: .tcp)
+        let tcpOptions = NWProtocolTCP.Options()
+        if let connectionTimeout {
+            tcpOptions.connectionTimeout = connectionTimeout
+        }
+        if enableKeepalive {
+            tcpOptions.enableKeepalive = true
+            tcpOptions.keepaliveIdle = keepaliveIdle
+            tcpOptions.keepaliveInterval = keepaliveInterval
+            tcpOptions.keepaliveCount = keepaliveCount
+        }
+        let parameters = NWParameters(tls: nil, tcp: tcpOptions)
+        let connection = NWConnection(host: nwHost, port: nwPort, using: parameters)
         self.connection = connection
 
         updateState(.connecting)
