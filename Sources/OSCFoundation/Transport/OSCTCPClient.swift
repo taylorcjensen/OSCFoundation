@@ -137,6 +137,8 @@ public actor OSCTCPClient {
             updateState(.connecting)
         case .waiting(let error):
             updateState(.failed(error.localizedDescription))
+            connection?.cancel()
+            connection = nil
         @unknown default:
             break
         }
