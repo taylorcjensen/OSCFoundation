@@ -6,6 +6,8 @@ public enum ConnectionState: Sendable, Equatable {
     case disconnected
     /// Actively establishing a connection.
     case connecting
+    /// Temporarily unable to make progress, but the connection may recover.
+    case waiting(String)
     /// Connected and ready to send/receive.
     case connected
     /// The connection failed or was terminated with an error.
@@ -15,6 +17,7 @@ public enum ConnectionState: Sendable, Equatable {
         switch (lhs, rhs) {
         case (.disconnected, .disconnected): true
         case (.connecting, .connecting): true
+        case (.waiting(let a), .waiting(let b)): a == b
         case (.connected, .connected): true
         case (.failed(let a), .failed(let b)): a == b
         default: false

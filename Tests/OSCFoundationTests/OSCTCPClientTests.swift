@@ -150,31 +150,57 @@ struct OSCTCPClientTests {
         #expect(ConnectionState.failed("error") == .failed("error"))
         // Different .failed message -> false
         #expect(ConnectionState.failed("timeout") != .failed("refused"))
+        // Same .waiting message -> true
+        #expect(ConnectionState.waiting("network down") == .waiting("network down"))
         // .connecting == .connecting -> true
         #expect(ConnectionState.connecting == .connecting)
     }
 
-    @Test("Connection to refused port transitions to failed")
+    @Test("Waiting state clears stale connected state and blocks sends")
+    func waitingStateBlocksSends() async throws {
+        let client = OSCTCPClient(host: "127.0.0.1", port: 9999)
+        let error = NWError.posix(.ENETDOWN)
+
+        await client.handleStateUpdate(.ready)
+        #expect(await client.state == .connected)
+
+        await client.handleStateUpdate(.waiting(error))
+        #expect(await client.state == .waiting(error.localizedDescription))
+
+        do {
+            try await client.send(try OSCMessage("/test"))
+            Issue.record("Expected notConnected error while waiting")
+        } catch let sendError as OSCTCPError {
+            #expect(sendError == .notConnected)
+        }
+
+        await client.handleStateUpdate(.ready)
+        #expect(await client.state == .connected)
+
+        await client.disconnect()
+    }
+
+    @Test("Connection to refused port transitions to waiting")
     func connectionRefused() async throws {
         // Port 1 on localhost is almost certainly not listening.
-        // NWConnection enters .waiting (connection refused), which our
-        // handler maps to ConnectionState.failed.
+        // NWConnection should enter .waiting and keep the connection alive
+        // for possible recovery rather than immediately surfacing .failed.
         let client = OSCTCPClient(host: "127.0.0.1", port: 1)
 
-        let failedTask = Task { () -> Bool in
+        let waitingTask = Task { () -> Bool in
             for await state in await client.stateUpdates {
-                if case .failed = state { return true }
+                if case .waiting = state { return true }
             }
             return false
         }
 
         await client.connect()
 
-        let gotFailed = await withTaskGroup(of: Bool.self) { group in
-            group.addTask { await failedTask.value }
+        let gotWaiting = await withTaskGroup(of: Bool.self) { group in
+            group.addTask { await waitingTask.value }
             group.addTask {
                 try? await Task.sleep(nanoseconds: 10_000_000_000)
-                failedTask.cancel()
+                waitingTask.cancel()
                 return false
             }
             for await result in group {
@@ -186,7 +212,7 @@ struct OSCTCPClientTests {
             return false
         }
 
-        #expect(gotFailed, "Expected connection to fail for refused port")
+        #expect(gotWaiting, "Expected refused port to surface a waiting state")
         await client.disconnect()
     }
 }

@@ -23,6 +23,7 @@ public actor OSCTCPClient {
     private let framing: TCPFraming
     private var connection: NWConnection?
     private var deframer: TCPDeframer
+    private var isReceiving = false
 
     private var packetContinuation: AsyncStream<OSCPacket>.Continuation?
     private var stateContinuation: AsyncStream<ConnectionState>.Continuation?
@@ -112,6 +113,7 @@ public actor OSCTCPClient {
     public func disconnect() {
         connection?.cancel()
         connection = nil
+        isReceiving = false
         deframer = TCPDeframer(framing: framing)
         updateState(.disconnected)
         packetContinuation?.finish()
@@ -122,23 +124,25 @@ public actor OSCTCPClient {
 
     // MARK: - Private
 
-    private func handleStateUpdate(_ nwState: NWConnection.State) {
+    func handleStateUpdate(_ nwState: NWConnection.State) {
         switch nwState {
         case .ready:
             updateState(.connected)
-            startReceiving()
+            if !isReceiving {
+                startReceiving()
+            }
         case .failed(let error):
+            isReceiving = false
             updateState(.failed(error.localizedDescription))
             connection?.cancel()
             connection = nil
         case .cancelled:
+            isReceiving = false
             updateState(.disconnected)
         case .preparing, .setup:
             updateState(.connecting)
-        case .waiting:
-            // NWConnection will auto-retry when the network path becomes viable.
-            // Do not report .failed or cancel — let the connection recover on its own.
-            break
+        case .waiting(let error):
+            updateState(.waiting(error.localizedDescription))
         @unknown default:
             break
         }
@@ -151,7 +155,11 @@ public actor OSCTCPClient {
 
     private func startReceiving() {
         guard let connection else { return }
+        isReceiving = true
+        receiveNext(on: connection)
+    }
 
+    private func receiveNext(on connection: NWConnection) {
         connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] content, _, isComplete, error in
             guard let self else { return }
 
@@ -162,7 +170,7 @@ public actor OSCTCPClient {
                 if isComplete || error != nil {
                     await self.disconnect()
                 } else {
-                    await self.startReceiving()
+                    await self.receiveNext(on: connection)
                 }
             }
         }
